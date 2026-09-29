@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GeoCanarias · El GeoGuessr de las Islas Canarias</title>
+  <meta name="description" content="¿Sabrías decir en qué rincón de Canarias estás? Juega solo o compite online con tus amigos.">
+  <meta name="theme-color" content="#061529">
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GeoCanarias">
+  <meta property="og:title" content="GeoCanarias · El GeoGuessr de las Islas Canarias">
+  <meta property="og:description" content="¿Sabrías decir en qué rincón de Canarias estás? Juega solo o compite online con tus amigos.">
+  <meta property="og:image" content="icono-512.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+  <!-- ===================== INICIO ===================== -->
+  <section id="pantalla-inicio" class="pantalla activa" aria-label="Inicio">
+    <div class="inicio-fondo" aria-hidden="true">
+      <svg class="mapa-islas decorativo" id="inicio-mapa"></svg>
+    </div>
+    <button class="btn-icono btn-sonido" id="btn-sonido" title="Sonido">🔊</button>
+    <div class="inicio-contenido">
+      <div class="logo">
+        <svg class="logo-pin" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4C20 4 11 13 11 25c0 16 21 35 21 35s21-19 21-35C53 13 44 4 32 4z" fill="currentColor"/><circle cx="32" cy="25" r="8" fill="#0768a9"/></svg>
+        <h1><span>Geo</span>Canarias</h1>
+      </div>
+      <p class="lema">¿Serías capaz de adivinar en qué rincón de las islas estás?</p>
+
+      <label class="campo-nombre">
+        <span>Tu nombre</span>
+        <input id="nombre-jugador" maxlength="20" placeholder="Ej.: Tanausú" autocomplete="nickname">
+      </label>
+
+      <div class="inicio-botones">
+        <button class="btn-modo" data-accion="ir-solo">
+          <span class="btn-modo-icono">🧭</span>
+          <span class="btn-modo-texto"><strong>Jugar solo</strong><small>Elige islas y dificultad</small></span>
+        </button>
+        <button class="btn-modo destacado" data-accion="ir-online">
+          <span class="btn-modo-icono">⚔️</span>
+          <span class="btn-modo-texto"><strong>Multijugador online</strong><small>Crea una sala y compite con amigos</small></span>
+        </button>
+        <button class="btn-modo" data-accion="ir-clasificacion">
+          <span class="btn-modo-icono">🏆</span>
+          <span class="btn-modo-texto"><strong>Clasificación</strong><small>Los que más saben de Canarias</small></span>
+        </button>
+      </div>
+      <button class="btn-texto btn-instalar" id="btn-instalar" hidden>📲 Instalar como app en el móvil</button>
+      <p class="creditos">Imágenes © Google Street View · Mapas © colaboradores de OpenStreetMap</p>
+    </div>
+  </section>
+
+  <!-- ===================== CONFIGURACIÓN SOLO ===================== -->
+  <section id="pantalla-config" class="pantalla pantalla-scroll" aria-label="Configurar partida">
+    <header class="barra">
+      <button class="btn-texto" data-accion="ir-inicio">← Volver</button>
+      <h2>Nueva partida</h2>
+      <span></span>
+    </header>
+    <div class="contenedor" id="config-solo"></div>
+    <footer class="pie-accion">
+      <p class="pie-nota" id="nota-clasificacion"></p>
+      <button class="btn-primario btn-xl" id="btn-empezar-solo">¡A jugar!</button>
+    </footer>
+  </section>
+
+  <!-- ===================== ONLINE: ENTRADA ===================== -->
+  <section id="pantalla-online" class="pantalla pantalla-scroll" aria-label="Multijugador">
+    <header class="barra">
+      <button class="btn-texto" data-accion="ir-inicio">← Volver</button>
+      <h2>Multijugador online</h2>
+      <span></span>
+    </header>
+    <div class="contenedor contenedor-estrecho">
+      <div class="aviso-sin-servidor" id="aviso-sin-servidor" hidden>
+        <strong>El modo online necesita el servidor del juego.</strong>
+        Arranca el juego con <code>npm start</code> y ábrelo desde la dirección que te indique.
+      </div>
+      <label class="campo-nombre">
+        <span>Jugarás como</span>
+        <input id="nombre-online" maxlength="20" placeholder="Tu nombre" autocomplete="nickname">
+      </label>
+      <div class="online-opciones">
+        <div class="tarjeta online-tarjeta">
+          <div class="online-icono">🏝️</div>
+          <h3>Crear una sala</h3>
+          <p>Tú eliges las islas y la dificultad. Comparte el código con tus amigos.</p>
+          <button class="btn-primario" id="btn-crear-sala">Crear sala</button>
+        </div>
+        <div class="tarjeta online-tarjeta">
+          <div class="online-icono">🔑</div>
+          <h3>Unirse a una sala</h3>
+          <p>Escribe el código de 4 letras que te han pasado.</p>
+          <form class="form-codigo" id="form-unirse">
+            <input id="codigo-sala" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false" aria-label="Código de sala">
+            <button class="btn-secundario" type="submit">Entrar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ONLINE: SALA DE ESPERA ===================== -->
+  <section id="pantalla-sala" class="pantalla pantalla-scroll" aria-label="Sala de espera">
+    <header class="barra">
+      <button class="btn-texto" data-accion="salir-sala">← Salir</button>
+      <h2>Sala de espera</h2>
+      <span></span>
+    </header>
+    <div class="contenedor">
+      <div class="sala-cabecera tarjeta">
+        <div>
+          <span class="etiqueta">Código de la sala</span>
+          <div class="sala-codigo" id="sala-codigo">····</div>
+        </div>
+        <div class="sala-compartir">
+          <button class="btn-secundario" id="btn-copiar-enlace">🔗 Copiar enlace de invitación</button>
+          <small id="sala-enlace"></small>
+        </div>
+      </div>
+      <div class="sala-grid">
+        <div class="tarjeta sala-jugadores">
+          <h3>Jugadores <span class="contador" id="sala-num-jugadores"></span></h3>
+          <ul class="lista-jugadores" id="sala-lista-jugadores"></ul>
+          <div class="barra-reacciones" data-reacciones></div>
+        </div>
+        <div class="sala-config">
+          <div id="sala-config-editable"></div>
+          <div id="sala-config-resumen"></div>
+        </div>
+      </div>
+    </div>
+    <footer class="pie-accion">
+      <p class="pie-nota" id="sala-nota"></p>
+      <button class="btn-primario btn-xl" id="btn-empezar-online">Empezar partida</button>
+    </footer>
+  </section>
+
+  <!-- ===================== JUEGO ===================== -->
+  <section id="pantalla-juego" class="pantalla" aria-label="Partida">
+    <div class="visor" id="visor">
+      <iframe id="visor-iframe" title="Vista de la calle" referrerpolicy="no-referrer-when-downgrade" allow="accelerometer; gyroscope; fullscreen"></iframe>
+      <div class="visor-bloqueo" id="visor-bloqueo" hidden><span>🧊 Imagen congelada</span></div>
+      <div class="visor-cargando" id="visor-cargando"><div class="spinner"></div><span>Viajando a las islas…</span></div>
+    </div>
+
+    <div class="hud hud-info">
+      <div class="hud-dato"><span>Ronda</span><strong id="hud-ronda">1 / 5</strong></div>
+      <div class="hud-dato"><span>Puntos</span><strong id="hud-puntos">0</strong></div>
+      <div class="hud-dato hud-pista" id="hud-pista" hidden><span>Isla</span><strong id="hud-pista-isla">—</strong></div>
+    </div>
+
+    <div class="hud hud-reloj" id="hud-reloj" hidden>
+      <span id="hud-reloj-texto">0:00</span>
+    </div>
+    <div class="hud-aviso" id="hud-aviso" hidden></div>
+
+    <div class="hud hud-botones">
+      <button class="btn-icono" id="btn-forzar" title="Terminar la ronda para todos (anfitrión)" hidden>⏭</button>
+      <button class="btn-icono" id="btn-reiniciar-vista" title="Volver al punto de partida (R)">⟲</button>
+      <button class="btn-icono" id="btn-abandonar" title="Salir de la partida">✕</button>
+    </div>
+
+    <div class="hud hud-jugadores" id="hud-jugadores" hidden></div>
+
+    <div class="panel-mapa" id="panel-mapa">
+      <div class="panel-mapa-barra">
+        <button class="btn-mini" id="btn-fijar-mapa" title="Mantener el mapa grande">📌</button>
+        <button class="btn-mini solo-movil" id="btn-cerrar-mapa" title="Cerrar mapa">✕</button>
+      </div>
+      <div class="mapa-adivinar" id="mapa-adivinar"></div>
+      <button class="btn-adivinar" id="btn-adivinar" disabled>Pon tu chincheta en el mapa</button>
+    </div>
+    <button class="btn-primario btn-abrir-mapa solo-movil" id="btn-abrir-mapa">🗺️ Abrir mapa</button>
+
+    <div class="barra-reacciones flotante" data-reacciones hidden id="reacciones-juego"></div>
+  </section>
+
+  <!-- ===================== RESULTADO DE RONDA ===================== -->
+  <section id="pantalla-resultado" class="pantalla" aria-label="Resultado de la ronda">
+    <div class="resultado-mapa" id="mapa-resultado"></div>
+    <div class="resultado-panel" id="resultado-panel"></div>
+  </section>
+
+  <!-- ===================== FINAL ===================== -->
+  <section id="pantalla-final" class="pantalla pantalla-scroll" aria-label="Resultado final">
+    <div class="contenedor final-contenedor" id="final-contenido"></div>
+  </section>
+
+  <!-- ===================== CLASIFICACIÓN ===================== -->
+  <section id="pantalla-clasificacion" class="pantalla pantalla-scroll" aria-label="Clasificación">
+    <header class="barra">
+      <button class="btn-texto" data-accion="ir-inicio">← Volver</button>
+      <h2>Clasificación</h2>
+      <span></span>
+    </header>
+    <div class="contenedor contenedor-estrecho">
+      <div class="pestanas" id="clas-origen" role="tablist">
+        <button class="pestana activa" data-origen="global" role="tab">🌍 Global</button>
+        <button class="pestana" data-origen="local" role="tab">📱 Mis partidas</button>
+      </div>
+      <div class="clas-filtros">
+        <div class="segmentado" id="clas-dificultad"></div>
+        <select id="clas-islas" aria-label="Islas"></select>
+      </div>
+      <div class="tarjeta">
+        <ol class="tabla-clasificacion" id="clas-lista"></ol>
+      </div>
+      <p class="pie-nota centrado">Solo puntúan las partidas de 5 rondas con una dificultad estándar.</p>
+    </div>
+  </section>
+
+  <div class="avisos" id="avisos" aria-live="polite"></div>
+  <div class="reacciones-capa" id="reacciones-capa" aria-hidden="true"></div>
+
+  <dialog class="dialogo" id="dialogo">
+    <h3 id="dialogo-titulo"></h3>
+    <p id="dialogo-texto"></p>
+    <div class="dialogo-botones">
+      <button type="button" class="btn-texto" id="dialogo-no">Cancelar</button>
+      <button type="button" class="btn-primario" id="dialogo-si">Aceptar</button>
+    </div>
+  </dialog>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

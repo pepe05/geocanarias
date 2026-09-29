@@ -1,0 +1,14 @@
+# Despliegue en Render (https://render.com) con el plan gratuito.
+# Render lee este archivo al crear el servicio desde el repositorio ("Blueprint").
+services:
+  - type: web
+    name: geocanarias
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/estado
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production

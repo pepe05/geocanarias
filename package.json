@@ -1,0 +1,20 @@
+{
+  "name": "geocanarias",
+  "version": "1.0.0",
+  "description": "GeoGuessr de las Islas Canarias: elige islas y dificultad, juega solo o compite online",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "generar-datos": "node tools/generar-datos.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}
