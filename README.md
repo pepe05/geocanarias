@@ -62,6 +62,12 @@ Para que cualquiera juegue desde el móvil, esté donde esté y sin instalar nad
 [Render](https://render.com), que tiene un plan gratuito con soporte para las salas online.
 El repositorio ya trae un `render.yaml` con toda la configuración.
 
+**La forma rápida (Windows):** doble clic en `Publicar.bat`. La primera vez instala GitHub CLI si hace
+falta, te pide iniciar sesión en GitHub, crea el repositorio, lo sube y abre Render para que pulses
+**Deploy Blueprint**. Las siguientes veces solo sube tus cambios y Render actualiza el juego solo.
+
+**A mano:**
+
 1. Sube esta carpeta a un repositorio de GitHub.
 2. Entra en `https://render.com/deploy?repo=URL_DE_TU_REPOSITORIO` (por ejemplo
    `https://render.com/deploy?repo=https://github.com/tu-usuario/geocanarias`), inicia sesión con tu
