@@ -2,3 +2,4 @@ node_modules/
 tools/.cache/
 datos-servidor/
 .claude/
+render-deploy-hook.txt

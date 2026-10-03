@@ -101,13 +101,26 @@ if errorlevel 1 goto error_push
 set "URL="
 for /f "delims=" %%r in ('gh repo view --json url --jq .url') do set "URL=%%r"
 
+rem ---------------------------------------------------------------- 7. Avisar a Render
+rem Si Render no despliega solo al subir, pega su "Deploy Hook" (Settings en Render) en render-deploy-hook.txt
+set "RENDER_AVISADO="
+if not exist "render-deploy-hook.txt" goto sin_hook
+set /p HOOK=<render-deploy-hook.txt
+curl -s -X POST "%HOOK%" >nul 2>nul
+if errorlevel 1 goto sin_hook
+set "RENDER_AVISADO=1"
+:sin_hook
+
 echo.
 echo  =============================================
 echo    Listo: %URL%
 echo  =============================================
 echo.
 if defined PRIMERA_VEZ goto render
-echo  Render actualizara el juego solo en unos minutos.
+if defined RENDER_AVISADO echo  Render ya ha recibido el aviso: la web se actualiza en 2 o 3 minutos.
+if not defined RENDER_AVISADO echo  Si la web no se actualiza en unos minutos: en Render pulsa "Manual Deploy" y "Deploy latest commit".
+if not defined RENDER_AVISADO echo  Para que sea automatico, copia el "Deploy Hook" de Render en el archivo render-deploy-hook.txt
+echo.
 echo  Si todavia no lo habias publicado en Render, entra en:
 echo  https://render.com/deploy?repo=%URL%
 goto fin
