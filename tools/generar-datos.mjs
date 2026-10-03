@@ -352,6 +352,7 @@ async function main() {
   const gruesos = await obtenerContornos(0.004);
   console.log('Descargando núcleos de población…');
   const nucleos = await obtenerNucleos();
+  await fs.writeFile(path.join(SALIDA, 'nucleos.json'), JSON.stringify(nucleos.filter((n) => ['city', 'town', 'village'].includes(n.tipo))));
   console.log(`  ${nucleos.length} núcleos`);
 
   // asignar cada núcleo a su isla

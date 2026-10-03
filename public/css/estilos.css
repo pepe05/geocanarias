@@ -407,6 +407,27 @@ select option { background: var(--fondo-2); }
 }
 .config-resumen strong { color: var(--texto); }
 
+.municipios-config { border-top: 1px solid var(--borde); margin-top: 24px; padding-top: 22px; }
+.ayuda-config { color: var(--texto-2); font-size: .85rem; line-height: 1.55; margin: 8px 0 12px; }
+.municipios-config input[type="search"] { width: 100%; min-width: 0; padding: 12px 14px; color: var(--texto); background: rgba(0,0,0,.2); border: 1px solid var(--borde-fuerte); border-radius: 12px; font: inherit; }
+.municipios-config input[type="search"]:focus { outline: 2px solid var(--amarillo); outline-offset: 2px; }
+.municipios-acciones { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 8px 0; }
+.municipios-acciones button { font-size: .8rem; }
+.municipios-lista { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; padding: 3px; }
+.municipio-opcion { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+.municipio-opcion:hover { background: rgba(255,255,255,.05); }
+.municipio-opcion:has(input:checked) { background: rgba(255,201,60,.09); border-color: var(--amarillo); }
+.municipio-opcion input { accent-color: var(--amarillo); width: 17px; height: 17px; flex-shrink: 0; }
+.municipio-opcion > span { flex: 1; font-size: .92rem; }
+.municipio-opcion small { color: var(--texto-3); font-size: .74rem; }
+.municipio-opcion span small { display: block; }
+.fuente-municipios { color: var(--texto-3); font-size: .7rem; }
+.fuente-municipios a { color: inherit; }
+.disponibilidad { color: var(--verde); background: rgba(61,220,132,.07); padding: 12px 14px; border-radius: 12px; font-size: .85rem; line-height: 1.5; }
+.disponibilidad.pocas { color: var(--amarillo); background: rgba(255,201,60,.08); }
+.ajuste select { max-width: 100%; }
+.mapa-guardado { background: rgba(6,21,41,.94); color: var(--texto-2); padding: 7px 10px; border-radius: 8px; font-size: .75rem; text-align: center; }
+
 /* resumen de solo lectura (invitados en la sala) */
 .resumen-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .resumen-lista li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--borde); }
@@ -485,30 +506,103 @@ select option { background: var(--fondo-2); }
   transition: transform .12s, background .12s;
 }
 .barra-reacciones button:hover { transform: scale(1.12); background: rgba(255,255,255,.1); }
-.barra-reacciones.flotante {
-  position: absolute; left: 16px; bottom: 16px; z-index: 6; margin: 0;
-  background: rgba(6, 21, 41, 0.7); padding: 6px; border-radius: 14px; backdrop-filter: blur(8px);
+
+/* Emojis que suben flotando por la pantalla */
+.reacciones-capa { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+.emoji-flotante {
+  position: absolute;
+  bottom: 90px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  animation: flotar-emoji 3.2s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+.emoji-flotante .emoji { font-size: 2.8rem; line-height: 1; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .45)); }
+.emoji-flotante .quien {
+  font-size: .75rem; font-weight: 700; color: #fff; white-space: nowrap;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(6, 21, 41, .85); border: 1.5px solid var(--c, var(--borde));
+}
+@keyframes flotar-emoji {
+  0% { opacity: 0; transform: translate(0, 30px) scale(.4); }
+  12% { opacity: 1; transform: translate(calc(var(--deriva) * .15), 0) scale(1.15) rotate(calc(var(--giro) * .3)); }
+  30% { transform: translate(calc(var(--deriva) * .35), -10vh) scale(1) rotate(calc(var(--giro) * -.4)); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--deriva), -55vh) scale(.9) rotate(var(--giro)); }
 }
 
-.reacciones-capa { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
-.burbuja {
-  position: absolute;
-  bottom: 70px;
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 12px 6px 6px;
-  border-radius: 999px;
-  background: rgba(6, 21, 41, 0.88);
-  border: 1px solid var(--borde);
-  font-weight: 600; font-size: .9rem;
-  animation: subir 2.6s ease-out forwards;
+/* ---------------- chat de la sala ---------------- */
+
+.chat {
+  position: fixed; left: 16px; bottom: 16px; z-index: 40;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
 }
-.burbuja .emoji { font-size: 1.6rem; }
-@keyframes subir {
-  0% { opacity: 0; transform: translateY(20px) scale(.8); }
-  12% { opacity: 1; transform: translateY(0) scale(1); }
-  80% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-160px); }
+.chat > * { pointer-events: auto; }
+.chat-botones { display: flex; align-items: center; gap: 8px; }
+.chat-abrir { position: relative; }
+.chat-contador {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  display: grid; place-items: center;
+  border-radius: 999px; background: var(--rojo); color: #fff;
+  font-size: .72rem; font-weight: 800;
 }
+.chat-emojis { display: flex; gap: 4px; flex-wrap: wrap; }
+.chat-emojis button {
+  width: 38px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--borde); background: rgba(0, 0, 0, .25);
+  font-size: 1.15rem; transition: transform .12s, background .12s;
+}
+.chat-emojis button:hover { transform: scale(1.15); background: rgba(255, 255, 255, .1); }
+.chat-emojis.rapidos {
+  flex-wrap: nowrap; padding: 5px; border-radius: 14px;
+  background: rgba(6, 21, 41, .88); border: 1px solid var(--borde); backdrop-filter: blur(8px);
+}
+.chat-panel {
+  width: 340px; max-width: calc(100vw - 32px); height: min(420px, 60vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: rgba(6, 21, 41, .96); border: 1px solid var(--borde-fuerte); border-radius: 18px;
+  box-shadow: var(--sombra); backdrop-filter: blur(10px);
+}
+.chat-cabecera { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
+.chat-mensajes { list-style: none; margin: 0; padding: 10px 12px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.chat-mensajes:empty::before { content: 'Aún no hay mensajes. ¡Saluda!'; color: var(--texto-3); font-size: .9rem; margin: auto; }
+.chat-mensajes li { display: flex; gap: 8px; align-items: flex-start; }
+.chat-mensajes li > div { min-width: 0; max-width: 82%; }
+.chat-mensajes p {
+  margin: 2px 0 0; padding: 7px 10px; line-height: 1.35;
+  background: rgba(255, 255, 255, .07); border-radius: 4px 12px 12px 12px;
+  overflow-wrap: anywhere;
+}
+.chat-mensajes li.mio { flex-direction: row-reverse; }
+.chat-mensajes li.mio > div { text-align: right; }
+.chat-mensajes li.mio p { background: var(--amarillo-suave); border-radius: 12px 4px 12px 12px; text-align: left; }
+.chat-autor { font-size: .78rem; font-weight: 700; color: var(--texto-2); }
+.chat-autor time { font-weight: 400; color: var(--texto-3); margin-left: 4px; }
+.chat-panel .chat-emojis { padding: 6px 12px; border-top: 1px solid var(--borde); }
+.chat-form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--borde); }
+.chat-form input {
+  flex: 1; min-width: 0; padding: 10px 12px; outline: none;
+  border-radius: 12px; border: 1px solid var(--borde-fuerte); background: rgba(0, 0, 0, .3);
+}
+.chat-form input:focus { border-color: var(--amarillo); }
+.chat-form .btn-primario { padding: 10px 16px; }
+.chat-burbujas { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.chat-burbuja {
+  display: flex; gap: 8px; align-items: center; max-width: 320px; text-align: left;
+  padding: 6px 12px 6px 6px; border-radius: 16px;
+  border: 1px solid var(--borde); background: rgba(6, 21, 41, .92); box-shadow: var(--sombra-sm);
+  font-size: .9rem; animation: aparecer .25s ease; transition: opacity .5s;
+}
+.chat-burbuja.saliendo { opacity: 0; }
+.chat-burbuja > span:last-child { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Dónde va el chat en cada pantalla */
+body[data-pantalla="sala"] .chat { bottom: 96px; }
+body[data-pantalla="resultado"] .chat { top: 12px; right: 12px; bottom: auto; left: auto; align-items: flex-end; flex-direction: column-reverse; }
+body[data-pantalla="resultado"] .chat-botones { flex-direction: row-reverse; }
+body[data-pantalla="resultado"] .chat-burbujas { align-items: flex-end; }
+body.mapa-abierto .chat { display: none; }
 
 /* ---------------- juego ---------------- */
 
@@ -868,7 +962,27 @@ select option { background: var(--fondo-2); }
   .panel-mapa-barra { opacity: 1; top: 20px; left: 20px; }
   .panel-mapa-barra .btn-mini { width: 40px; height: 40px; font-size: 1.1rem; background: rgba(6, 21, 41, 0.9); color: #fff; }
   #btn-fijar-mapa { display: none; }
-  .barra-reacciones.flotante { bottom: 70px; }
+
+  /* El botón de volver al inicio baja a la derecha y tapa el control de giroscopio de Google */
+  #btn-reiniciar-vista { display: none !important; }
+  .tapa-movimiento.solo-movil {
+    display: grid !important;
+    position: absolute; z-index: 5;
+    right: 4px; bottom: 189px;
+    width: 52px; height: 52px; border-radius: 14px;
+    font-size: 1.35rem;
+  }
+  .tapa-movimiento:disabled { cursor: default; }
+
+  body[data-pantalla="juego"] .chat { left: 12px; bottom: 72px; }
+  body[data-pantalla="sala"] .chat { left: 12px; bottom: 150px; }
+  .chat-panel {
+    position: fixed; z-index: 45;
+    left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto; max-width: none; height: min(70vh, 520px);
+  }
+  .chat-emojis.rapidos { flex-wrap: wrap; width: 176px; }
+  .chat-burbuja { max-width: calc(100vw - 40px); }
 
   .resultado-panel { max-height: 60vh; }
   .final-mapa { height: 280px; }

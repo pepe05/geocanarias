@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "generar-datos": "node tools/generar-datos.mjs"
+    "generar-datos": "node tools/generar-datos.mjs && node tools/generar-municipios.mjs",
+    "generar-municipios": "node tools/generar-municipios.mjs",
+    "ampliar-banco": "node tools/ampliar-banco.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
@@ -16,5 +19,8 @@
     "compression": "^1.8.2",
     "express": "^5.1.0",
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
   }
 }

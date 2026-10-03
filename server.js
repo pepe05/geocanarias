@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crearGestorSalas } from './servidor/salas.js';
 import { crearClasificacion } from './servidor/clasificacion.js';
+import { crearCatalogo } from './servidor/ubicaciones.js';
 
 const RAIZ = path.dirname(fileURLToPath(import.meta.url));
 const PUERTO = Number(process.env.PORT) || 3000;
@@ -16,6 +17,10 @@ const EN_LA_NUBE = !!process.env.RENDER || process.env.NODE_ENV === 'production'
 const leerJson = (ruta) => JSON.parse(fs.readFileSync(path.join(RAIZ, ruta), 'utf8'));
 const islas = leerJson('public/data/islas.json');
 const { ubicaciones } = leerJson('public/data/ubicaciones.json');
+const municipios = leerJson('public/data/limites-municipales.json');
+// segundoPlano: el servidor va descubriendo lugares al azar para que las partidas empiecen al instante
+const catalogo = crearCatalogo({ ubicaciones, islas, municipios, segundoPlano: true,
+  nucleos: leerJson('public/data/nucleos.json'), directorio: path.join(RAIZ, 'datos-servidor') });
 
 const app = express();
 const http = createServer(app);
@@ -25,7 +30,7 @@ const io = new Server(http, { pingInterval: 10000, pingTimeout: 20000, maxHttpBu
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(compression());
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(RAIZ, 'public'), { extensions: ['html'] }));
 
 const clasificacion = crearClasificacion({
@@ -38,15 +43,36 @@ const clasificacion = crearClasificacion({
 const envios = new Map();
 function limiteEnvios(req, res, next) {
   const ahora = Date.now();
-  const lista = (envios.get(req.ip) || []).filter((t) => ahora - t < 5 * 60 * 1000);
-  if (lista.length >= 8) return res.status(429).json({ ok: false, error: 'Demasiadas partidas seguidas. Espera un poco.' });
+  const clave = `${req.ip}:${req.path}`;
+  const lista = (envios.get(clave) || []).filter((t) => ahora - t < 5 * 60 * 1000);
+  if (lista.length >= (req.path === '/api/clasificacion' ? 8 : 40)) return res.status(429).json({ ok: false, error: 'Demasiadas partidas seguidas. Espera un poco.' });
   lista.push(ahora);
-  envios.set(req.ip, lista);
+  envios.set(clave, lista);
   next();
 }
 setInterval(() => envios.clear(), 30 * 60 * 1000).unref();
 
-app.get('/api/estado', (_req, res) => res.json({ ok: true, online: true, ubicaciones: ubicaciones.length }));
+// También sirve para comprobar en el hosting que la búsqueda de lugares aleatorios funciona
+app.get('/api/estado', (_req, res) => res.json({ ok: true, online: true, ubicaciones: ubicaciones.length, aleatorias: catalogo.resumen() }));
+
+app.post('/api/historial', limiteEnvios, (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.slice(0, 64) : '';
+  if (!token || !Array.isArray(req.body.vistas)) return res.status(400).json({ ok: false });
+  try {
+    catalogo.recordar(token, req.body.vistas.filter((v) => typeof v === 'string' && v.length <= 120));
+    res.json({ ok: true });
+  } catch { res.status(500).json({ ok: false, error: 'No se pudo guardar el historial.' }); }
+});
+
+app.post('/api/partida', limiteEnvios, async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.slice(0, 64) : '';
+  if (!token) return res.status(400).json({ ok: false, error: 'Falta el identificador del jugador.' });
+  const vistas = Array.isArray(req.body.vistas) ? req.body.vistas.filter((v) => typeof v === 'string' && v.length <= 120) : [];
+  try {
+    const partida = await catalogo.preparar(req.body.config, { tokens: [token], excluir: vistas });
+    res.json({ ok: true, ...partida });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 
 app.get('/api/clasificacion', (req, res) => {
   res.json(clasificacion.consultar({ dificultad: req.query.dificultad, islas: req.query.islas }));
@@ -57,7 +83,7 @@ app.post('/api/clasificacion', limiteEnvios, (req, res) => {
   res.status(resultado.ok ? 200 : 400).json(resultado);
 });
 
-crearGestorSalas(io, { islas, ubicaciones });
+crearGestorSalas(io, { islas, ubicaciones, municipios, catalogo });
 
 function ipsLocales() {
   return Object.values(os.networkInterfaces())

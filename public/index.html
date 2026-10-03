@@ -150,15 +150,18 @@
   <!-- ===================== JUEGO ===================== -->
   <section id="pantalla-juego" class="pantalla" aria-label="Partida">
     <div class="visor" id="visor">
-      <iframe id="visor-iframe" title="Vista de la calle" referrerpolicy="no-referrer-when-downgrade" allow="accelerometer; gyroscope; fullscreen"></iframe>
+      <!-- Sin acceso a los sensores: Street View no puede girar la vista moviendo el móvil -->
+      <iframe id="visor-iframe" title="Vista de la calle" referrerpolicy="no-referrer-when-downgrade" allow="fullscreen; accelerometer 'none'; gyroscope 'none'; magnetometer 'none'"></iframe>
       <div class="visor-bloqueo" id="visor-bloqueo" hidden><span>🧊 Imagen congelada</span></div>
       <div class="visor-cargando" id="visor-cargando"><div class="spinner"></div><span>Viajando a las islas…</span></div>
     </div>
+    <!-- En el móvil tapa el botón de Google de "mover la vista con el teléfono" (giroscopio) -->
+    <button class="btn-icono tapa-movimiento solo-movil" id="btn-reiniciar-movil" title="Volver al punto de partida">⟲</button>
 
     <div class="hud hud-info">
       <div class="hud-dato"><span>Ronda</span><strong id="hud-ronda">1 / 5</strong></div>
       <div class="hud-dato"><span>Puntos</span><strong id="hud-puntos">0</strong></div>
-      <div class="hud-dato hud-pista" id="hud-pista" hidden><span>Isla</span><strong id="hud-pista-isla">—</strong></div>
+      <div class="hud-dato hud-pista" id="hud-pista" hidden><span id="hud-pista-etiqueta">Isla</span><strong id="hud-pista-isla">—</strong></div>
     </div>
 
     <div class="hud hud-reloj" id="hud-reloj" hidden>
@@ -180,11 +183,11 @@
         <button class="btn-mini solo-movil" id="btn-cerrar-mapa" title="Cerrar mapa">✕</button>
       </div>
       <div class="mapa-adivinar" id="mapa-adivinar"></div>
+      <small class="mapa-guardado" id="mapa-guardado" aria-live="polite">Al terminar el tiempo se guarda tu última chincheta</small>
       <button class="btn-adivinar" id="btn-adivinar" disabled>Pon tu chincheta en el mapa</button>
     </div>
     <button class="btn-primario btn-abrir-mapa solo-movil" id="btn-abrir-mapa">🗺️ Abrir mapa</button>
 
-    <div class="barra-reacciones flotante" data-reacciones hidden id="reacciones-juego"></div>
   </section>
 
   <!-- ===================== RESULTADO DE RONDA ===================== -->
@@ -223,6 +226,28 @@
 
   <div class="avisos" id="avisos" aria-live="polite"></div>
   <div class="reacciones-capa" id="reacciones-capa" aria-hidden="true"></div>
+
+  <!-- ===================== CHAT DE LA SALA (solo online) ===================== -->
+  <div class="chat" id="chat" hidden>
+    <div class="chat-burbujas" id="chat-burbujas" aria-live="polite"></div>
+    <div class="chat-panel" id="chat-panel" hidden role="dialog" aria-label="Chat de la sala">
+      <div class="chat-cabecera">
+        <strong>💬 Chat de la sala</strong>
+        <button type="button" class="btn-mini" id="chat-cerrar" title="Cerrar chat (Esc)">✕</button>
+      </div>
+      <ol class="chat-mensajes" id="chat-mensajes"></ol>
+      <div class="chat-emojis" id="chat-emojis-panel"></div>
+      <form class="chat-form" id="chat-form" autocomplete="off">
+        <input id="chat-texto" maxlength="200" placeholder="Escribe un mensaje…" aria-label="Mensaje" enterkeyhint="send">
+        <button class="btn-primario" type="submit" title="Enviar">➤</button>
+      </form>
+    </div>
+    <div class="chat-botones">
+      <button type="button" class="btn-icono chat-abrir" id="chat-abrir" title="Chat de la sala">💬<span class="chat-contador" id="chat-contador" hidden>0</span></button>
+      <button type="button" class="btn-icono" id="chat-emoji" title="Enviar una reacción" aria-expanded="false">😀</button>
+      <div class="chat-emojis rapidos" id="chat-emojis-rapidos" hidden></div>
+    </div>
+  </div>
 
   <dialog class="dialogo" id="dialogo">
     <h3 id="dialogo-titulo"></h3>

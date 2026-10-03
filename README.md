@@ -39,8 +39,21 @@ Y abre <http://localhost:3000>.
 | 🦎 Difícil | Libre | 90 s | Zonas rurales | — |
 | 🔥 Extremo | Congelado (sin mover, girar ni zoom) | 45 s | Mezcla | — |
 
-En *Ajustes personalizados* puedes cambiar cada cosa por separado y elegir 3, 5 o 10 rondas.
-Solo entran en la clasificación las partidas de 5 rondas con una dificultad estándar.
+Puedes seleccionar cualquiera de los **88 municipios**, combinar varios y buscarlos por nombre.
+La Graciosa se incluye en Teguise y sigue pudiéndose elegir como isla independiente. Al filtrar
+municipios, el mapa y la escala de puntuación se ajustan al territorio elegido.
+
+En *Ajustes personalizados* puedes elegir **1, 3, 5, 10, 15, 20 o 30 rondas**, tiempos de **15 segundos
+a 10 minutos o sin límite**, reparto equilibrado entre islas o azar total, orientación inicial de
+carretera/aleatoria/norte y pistas de isla o municipio. Online, la cuenta atrás tras la primera respuesta
+puede durar 10, 15, 30 o 60 segundos, o desactivarse.
+Solo entran en la clasificación las partidas de 5 rondas con dificultad estándar, sin filtro municipal
+ni pista de municipio, con reparto equilibrado y orientación de carretera.
+
+**Tu última chincheta cuenta al agotarse el tiempo**, aunque no pulses Adivinar. Puedes arrastrarla.
+Online se guarda en el servidor mientras la mueves; también se usa al forzar el fin o si te desconectas
+después de que el servidor la haya recibido. Al reconectar se recupera tu chincheta. Los rivales no la ven
+hasta los resultados. Sin chincheta, la ronda vale 0 puntos.
 
 La puntuación depende del tamaño de la zona elegida: fallar por 5 km en todo el archipiélago da muchos
 más puntos que fallar por 5 km jugando solo en La Gomera.
@@ -98,17 +111,52 @@ Cosas del plan gratuito de Render:
 
 ## Las ubicaciones
 
-`public/data/ubicaciones.json` trae unas 1.700 ubicaciones con cobertura oficial de Street View comprobada,
-repartidas por las 8 islas y clasificadas en urbanas y rurales. Para generar un banco nuevo
-(tarda unos minutos):
+**Por defecto las ubicaciones son totalmente aleatorias**: cada partida saca lugares nuevos al azar de
+todo el territorio elegido (islas o municipios), comprobando que tengan Street View oficial.
+El servidor:
+
+- sortea puntos uniformemente por la superficie real de cada isla o municipio (o junto a un pueblo
+  si pides zonas urbanas) y busca el panorama más cercano (`servidor/explorador.js`);
+- mantiene en segundo plano una **reserva** de lugares recién descubiertos por isla, para que la
+  partida empiece al instante; si la reserva no basta (por ejemplo, con un municipio concreto),
+  busca en directo unos segundos;
+- añade todo lo que descubre al banco (`datos-servidor/ubicaciones-extra.json`), que crece solo;
+- si Street View no respondiera, completa la partida con el banco sin repetir y lo avisa.
+
+`/api/estado` muestra cuántos lugares hay en la reserva y si ha habido algún error al buscarlos:
+útil para comprobar en Render que todo funciona.
+
+En *Ajustes personalizados → De dónde salen los lugares* puedes elegir **Solo el banco** si prefieres
+lugares ya conocidos.
+
+### El banco
+
+`public/data/ubicaciones.json` es el banco de respaldo, con cobertura oficial comprobada, repartido
+por las 8 islas y clasificado en urbano/rural. Para añadirle más lugares al azar (sin borrar nada):
 
 ```bash
-npm run generar-datos
+npm run ampliar-banco -- --nuevas 5000
 ```
 
-El script descarga los contornos de las islas y los núcleos de población de OpenStreetMap y busca
-panoramas de Street View al azar dentro de cada isla. Los objetivos por isla están al principio de
-`tools/generar-datos.mjs`.
+`npm run generar-datos` lo regenera desde cero con el método original (tarda bastante más).
+
+El historial ya no se recorta a 500 lugares ni se borra cuando quedan pocos. Se comprueban ID,
+panorama y coordenadas; cada partida reserva sus ubicaciones para impedir repeticiones entre pestañas,
+salas y revanchas. Online se excluye el historial de todos los participantes; los jugadores nuevos
+entran en la sala de espera o al terminar la partida. El navegador conserva el historial local y el
+servidor lo guarda en `datos-servidor/historiales.json` junto con los panoramas descubiertos.
+
+La búsqueda respeta siempre isla, municipio y tipo de zona: nunca cambia de zona ni repite para
+completar una partida. Sin servidor (hosting estático) solo se puede usar el banco incluido.
+
+Los municipios proceden del [portal del Gobierno de Canarias / SITCAN](https://datos.canarias.es/catalogos/general/dataset/islas-y-municipios/resource/694f039d-c3d4-4802-af42-25562b37c577).
+Son límites sin carácter oficial, adecuados para este juego. `npm run generar-municipios` actualiza
+el catálogo y la asignación de cada ubicación. Los contornos completos se usan en el servidor y el
+navegador descarga solo el catálogo reducido. Conserva `datos-servidor/` para mantener los historiales
+al desplegar; un hosting con disco efímero puede perderlos al reiniciar.
+
+Ejecuta `npm test` para verificar la selección sin repeticiones, los filtros, la generación y el guardado
+de chinchetas con conexiones reales de multijugador.
 
 ## Estructura
 
@@ -116,18 +164,22 @@ panoramas de Street View al azar dentro de cada isla. Los objetivos por isla est
 server.js                 servidor Express + Socket.IO
 servidor/salas.js         lógica de las salas online (el servidor controla tiempo y puntos)
 servidor/clasificacion.js clasificación global (recalcula la puntuación en el servidor)
+servidor/explorador.js    descubre panoramas al azar dentro del territorio elegido
+servidor/ubicaciones.js   catálogo: reserva en segundo plano, historial sin repeticiones y banco
 public/index.html         todas las pantallas del juego
 public/js/nucleo.js       reglas compartidas por cliente y servidor: dificultades, puntuación, selección
 public/js/…               pantallas, mapas (Leaflet), visor de Street View, modos solo y online
 public/data/              islas y ubicaciones
-tools/generar-datos.mjs   generador del banco de ubicaciones
+tools/ampliar-banco.mjs   añade lugares aleatorios al banco de respaldo
+tools/generar-datos.mjs   generador original del banco de ubicaciones
 ```
 
 ## Limitaciones conocidas
 
 - El visor público de Street View no permite ocultar los nombres de calle pintados sobre el asfalto
   ni el modo "sin moverse pero girando" de GeoGuessr; por eso el modo difícil de verdad es el *Congelado*.
-- La lista de ubicaciones se genera desde un servicio no documentado de Google. Si algún día deja de
-  funcionar, el juego sigue funcionando con las ubicaciones ya generadas.
+- Las ubicaciones aleatorias se buscan en un servicio no documentado de Google. Si algún día deja de
+  funcionar (o bloquea al servidor del hosting), el juego sigue funcionando con el banco y
+  `/api/estado` muestra el error.
 - El modo solitario funciona también sin servidor (por ejemplo, subiendo `public/` a un hosting
   estático), pero entonces no hay modo online ni clasificación global.

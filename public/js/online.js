@@ -1,12 +1,14 @@
 // Modo multijugador: salas con código, sincronizadas por Socket.IO.
 /* global io */
 
-import { $, esc, inicial, aviso, confirmar, mostrarPantalla, pantalla, almacen, sesion } from './ui.js';
+import { $, esc, inicial, aviso, confirmar, mostrarPantalla, pantalla, alCambiarPantalla, almacen, sesion } from './ui.js';
 import { crearConfigPartida, pintarResumenConfig } from './config-partida.js';
-import { SEGUNDOS_CUENTA_ATRAS, normalizarConfig } from './nucleo.js';
+import { normalizarConfig } from './nucleo.js';
 import { sonido } from './sonido.js';
+import { obtenerToken, recordarUbicaciones, leerVistas } from './historial.js';
+import { crearChat, REACCIONES } from './chat.js';
 
-const REACCIONES = ['👏', '😂', '😱', '🔥', '🤔', '😎', '🌋', '🐐'];
+const PANTALLAS_CON_CHAT = ['sala', 'juego', 'resultado', 'final'];
 
 function cargarScript(src) {
   return new Promise((resolver, rechazar) => {
@@ -16,15 +18,6 @@ function cargarScript(src) {
     s.onerror = () => rechazar(new Error('No se pudo cargar ' + src));
     document.head.append(s);
   });
-}
-
-function obtenerToken() {
-  let t = almacen.leer('token');
-  if (!t) {
-    t = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now();
-    almacen.escribir('token', t);
-  }
-  return t;
 }
 
 export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSalir }) {
@@ -38,15 +31,33 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
   let finalPintado = null;
   let avisoCuentaAtras = false;
   let temporizadorConfig = null;
+  let avisoPreparando = null;
   const token = obtenerToken();
+
+  const chat = crearChat({
+    alEnviar: (texto) => socket?.emit('chat', texto),
+    alReaccion: (emoji) => socket?.emit('reaccion', emoji),
+  });
+  const actualizarChat = () => chat.mostrar(!!codigo && PANTALLAS_CON_CHAT.includes(pantalla()));
+  alCambiarPantalla(actualizarChat);
 
   // ------------------------------------------------------------ conexión
   async function conectar() {
     if (socket) return socket;
+    const sincronizacion = await fetch('api/historial', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, vistas: [...leerVistas()] }), signal: AbortSignal.timeout(8000) });
+    if (!sincronizacion.ok) throw new Error('No se pudo sincronizar el historial de ubicaciones');
     if (!window.io) await cargarScript('socket.io/socket.io.js');
     socket = io({ transports: ['websocket', 'polling'] });
     socket.on('estado', recibirEstado);
     socket.on('reaccion', mostrarReaccion);
+    socket.on('chat', (m) => chat.recibir(m));
+    socket.on('chatAviso', (texto) => aviso(texto, 'error'));
+    socket.on('errorPartida', (texto) => aviso(texto, 'error', 9000));
+    socket.on('avisoPartida', (texto) => aviso(texto, '', 7000));
+    socket.on('marcadorGuardado', (m) => {
+      if (m.rondaId === estado?.rondaId) juego.marcadorGuardado();
+    });
     socket.on('connect', () => {
       if (codigo) {
         socket.emit('unirse', { codigo, nombre: nombreJugador(), token }, (r) => {
@@ -54,6 +65,9 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
             aviso(r?.error || 'La sala ya no existe', 'error');
             olvidarSala();
             alSalir();
+          } else {
+            chat.cargar(r.chat, yoId);
+            recibirEstado(r.estado);
           }
         });
       }
@@ -77,9 +91,11 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
     if (codigo) fetch('api/estado', { cache: 'no-store' }).catch(() => {});
   }, 4 * 60 * 1000);
 
-  function recordarSala(c, id) {
+  function recordarSala(c, id, historialChat) {
     codigo = c;
     yoId = id;
+    chat.cargar(historialChat, id);
+    actualizarChat();
     sesion.escribir('sala', c);
     const url = new URL(location.href);
     url.searchParams.set('sala', c);
@@ -93,6 +109,8 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
     finalPintado = null;
     editor = null;
     editorDeAnfitrion = null;
+    chat.vaciar();
+    actualizarChat();
     sesion.escribir('sala', null);
     const url = new URL(location.href);
     url.searchParams.delete('sala');
@@ -108,7 +126,7 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
     const config = normalizarConfig(almacen.leer('configOnline') || almacen.leer('configSolo') || {});
     socket.emit('crear', { nombre: nombreJugador(), token, config }, (r) => {
       if (!r?.ok) return aviso(r?.error || 'No se pudo crear la sala', 'error');
-      recordarSala(r.codigo, r.id);
+      recordarSala(r.codigo, r.id, r.chat);
       recibirEstado(r.estado);
     });
   }
@@ -127,7 +145,7 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
         if (sesion.leer('sala') === c) olvidarSala();
         return;
       }
-      recordarSala(r.codigo, r.id);
+      recordarSala(r.codigo, r.id, r.chat);
       recibirEstado(r.estado);
     });
   }
@@ -152,6 +170,15 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
     const yo = s.jugadores.find((j) => j.id === yoId);
     if (!yo) return;
 
+    const preparando = s.estado === 'preparando';
+    $('#btn-empezar-online').disabled = preparando;
+    $('#btn-empezar-online').textContent = preparando ? '🎲 Buscando lugares al azar…' : 'Empezar partida';
+    // Casi siempre la partida está lista al instante: solo se avisa si la búsqueda se alarga
+    clearTimeout(avisoPreparando);
+    if (preparando) {
+      avisoPreparando = setTimeout(() => aviso('Buscando lugares nuevos al azar. Puede tardar unos segundos…', '', 5000), 1500);
+      return;
+    }
     if (s.estado === 'sala') {
       finalPintado = null;
       pintarSala(s);
@@ -160,7 +187,8 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
         mostrarPantalla('sala');
       }
     } else if (s.estado === 'ronda') {
-      const nueva = !anterior || anterior.estado !== 'ronda' || anterior.ronda !== s.ronda || pantalla() !== 'juego';
+      recordarUbicaciones([s.ubicacion]);
+      const nueva = !anterior || anterior.estado !== 'ronda' || anterior.rondaId !== s.rondaId || pantalla() !== 'juego';
       const fin = s.finRonda ? s.finRonda - desfase : null;
       if (nueva) {
         avisoCuentaAtras = false;
@@ -174,13 +202,15 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
             finRonda: fin,
             color: yo.color,
             online: true,
+            marcador: s.miMarcador,
           },
           {
             alAdivinar: (pos) => enviarIntento(pos),
+            alMarcar: (pos) => socket.emit('marcador', { ...pos, rondaId: s.rondaId }),
             alTiempoAgotado: (pos) => (pos ? enviarIntento(pos) : juego.esperando('⌛ Se acabó el tiempo')),
             alAbandonar: () => salir(),
             alForzar: async () => {
-              const ok = await confirmar('¿Terminar la ronda ya?', 'Quien no haya adivinado se quedará con 0 puntos en esta ronda.', { si: 'Terminar ronda', no: 'Esperar' });
+              const ok = await confirmar('¿Terminar la ronda ya?', 'Se guardará la última chincheta de cada jugador. Quien no haya colocado ninguna tendrá 0 puntos.', { si: 'Terminar ronda', no: 'Esperar' });
               if (ok) socket.emit('forzarFin');
             },
           },
@@ -188,15 +218,17 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
       } else if (anterior.finRonda !== s.finRonda) {
         juego.establecerFin(fin);
       }
+      if (s.miMarcador && !nueva && !yo.haAdivinado) juego.restaurarMarcador(s.miMarcador);
       juego.actualizarJugadores(s.jugadores, yoId);
       juego.mostrarForzar(s.anfitrion === yoId && yo.haAdivinado && s.jugadores.filter((j) => j.conectado).length > 1);
       if (yo.haAdivinado) juego.esperando();
       else if (s.config.cuentaAtras && !avisoCuentaAtras && s.jugadores.some((j) => j.haAdivinado)) {
         avisoCuentaAtras = true;
         const quien = s.jugadores.find((j) => j.haAdivinado);
-        juego.aviso(`⚡ ${quien.nombre} ya ha adivinado: ¡te quedan ${SEGUNDOS_CUENTA_ATRAS} segundos!`, 5000);
+        juego.aviso(`⚡ ${quien.nombre} ya ha adivinado: ¡quedan ${Math.max(0, Math.ceil((fin - Date.now()) / 1000))} segundos!`, 5000);
       }
     } else if (s.estado === 'resultado') {
+      recordarUbicaciones(s.resultados.map((r) => r.ubicacion));
       const nueva = !anterior || anterior.estado !== 'resultado' || anterior.ronda !== s.ronda || pantalla() !== 'resultado';
       if (nueva) juego.detener();
       resultados.rondaOnline({
@@ -207,6 +239,7 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
         reacciones: pintarReacciones,
       });
     } else if (s.estado === 'final') {
+      recordarUbicaciones(s.resultados.map((r) => r.ubicacion));
       const clave = `${s.codigo}-${s.resultados.map((r) => r.ubicacion.id).join()}`;
       if (finalPintado === clave && pantalla() === 'final') return;
       finalPintado = clave;
@@ -223,7 +256,7 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
   }
 
   function enviarIntento(pos) {
-    socket.emit('adivinar', pos);
+    socket.emit('adivinar', { ...pos, rondaId: estado.rondaId });
     juego.esperando();
   }
 
@@ -251,6 +284,7 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
       contResumen.innerHTML = '';
       if (!editor || editorDeAnfitrion !== yoId) {
         editor = crearConfigPartida(contEditable, {
+          ...datos,
           islas: datos.islas,
           islaPorId: datos.islaPorId,
           config: s.config,
@@ -290,17 +324,21 @@ export function crearModoOnline({ datos, juego, resultados, nombreJugador, alSal
     };
   }
 
+  // Emoji grande que sube flotando por la pantalla con el nombre de quien lo envía
   function mostrarReaccion({ id, emoji }) {
     const j = estado?.jugadores.find((x) => x.id === id);
-    if (!j) return;
+    if (!j || !REACCIONES.includes(emoji)) return;
     const capa = $('#reacciones-capa');
+    while (capa.children.length > 24) capa.firstElementChild.remove();
     const b = document.createElement('div');
-    b.className = 'burbuja';
-    b.style.left = `${8 + Math.random() * 70}%`;
-    b.innerHTML = `<span class="avatar peq" style="--c:${j.color}">${esc(inicial(j.nombre))}</span><span class="emoji">${emoji}</span>${esc(j.nombre)}`;
+    b.className = 'emoji-flotante';
+    b.style.left = `${6 + Math.random() * 78}%`;
+    b.style.setProperty('--deriva', `${Math.round((Math.random() - 0.5) * 120)}px`);
+    b.style.setProperty('--giro', `${Math.round((Math.random() - 0.5) * 40)}deg`);
+    b.innerHTML = `<span class="emoji">${emoji}</span><span class="quien" style="--c:${j.color}">${esc(j.nombre)}</span>`;
     capa.append(b);
     sonido.pop();
-    setTimeout(() => b.remove(), 2700);
+    setTimeout(() => b.remove(), 3300);
   }
 
   // ------------------------------------------------------------ botones

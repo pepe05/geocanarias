@@ -43,10 +43,17 @@ export function crearMapaAdivinar(elemento, { alMarcar } = {}) {
 
   const encuadrar = () => mapa.fitBounds(limites, { padding: [10, 10], animate: false });
 
+  function colocar(pos) {
+    if (!marca) {
+      marca = L.marker(pos, { icon: iconoPin(color), keyboard: false, draggable: true }).addTo(mapa);
+      marca.on('drag', () => { if (!bloqueado) alMarcar?.(marca.getLatLng()); });
+      marca.on('dragend', () => { if (!bloqueado) alMarcar?.(marca.getLatLng()); });
+    } else marca.setLatLng(pos);
+  }
+
   mapa.on('click', (e) => {
     if (bloqueado) return;
-    if (!marca) marca = L.marker(e.latlng, { icon: iconoPin(color), keyboard: false }).addTo(mapa);
-    else marca.setLatLng(e.latlng);
+    colocar(e.latlng);
     alMarcar?.(e.latlng);
   });
 
@@ -65,8 +72,10 @@ export function crearMapaAdivinar(elemento, { alMarcar } = {}) {
       else mapa.setView(limites.getCenter(), 8, { animate: false });
     },
     posicion: () => (marca ? marca.getLatLng() : null),
+    restaurar(pos) { if (pos && !bloqueado) colocar(pos); },
     bloquear(b) {
       bloqueado = b;
+      if (marca) b ? marca.dragging.disable() : marca.dragging.enable();
     },
     refrescar() {
       mapa.invalidateSize();

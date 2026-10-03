@@ -32,10 +32,16 @@ export const DIFICULTADES = {
 };
 
 export const OPCIONES = {
-  rondas: [3, 5, 10],
-  tiempo: [0, 30, 45, 60, 90, 120, 180, 300],
+  rondas: [1, 3, 5, 10, 15, 20, 30],
+  tiempo: [0, 15, 30, 45, 60, 90, 120, 180, 300, 600],
   movimiento: ['libre', 'congelado'],
   zonas: ['urbano', 'mixto', 'rural'],
+  reparto: ['equilibrado', 'azar'],
+  orientacion: ['carretera', 'aleatoria', 'norte'],
+  // aleatoria: lugares nuevos al azar en cada partida; banco: solo ubicaciones ya conocidas.
+  // Los valores antiguos ("auto", "explorar") se normalizan a "aleatoria".
+  fuente: ['aleatoria', 'banco'],
+  segundosCuentaAtras: [10, 15, 30, 60],
 };
 
 export const NOMBRES_ZONAS = { urbano: 'Pueblos y ciudades', mixto: 'Mezcla', rural: 'Zonas rurales' };
@@ -45,7 +51,9 @@ const CAMPOS_DIFICULTAD = ['tiempo', 'movimiento', 'zonas', 'pistaIsla'];
 
 export function configPorDefecto() {
   return aplicarDificultad(
-    { islas: [...ISLAS_ORDEN], rondas: 5, cuentaAtras: true },
+    { islas: [...ISLAS_ORDEN], municipios: [], rondas: 5, cuentaAtras: true,
+      segundosCuentaAtras: 15, reparto: 'equilibrado', orientacion: 'carretera',
+      fuente: 'aleatoria', pistaMunicipio: false },
     'normal',
   );
 }
@@ -67,20 +75,28 @@ export function recalcularDificultad(config) {
 }
 
 // Limpia una configuración recibida de fuera (formularios, red)
-export function normalizarConfig(entrada = {}) {
+export function normalizarConfig(entrada = {}, municipios = null) {
+  if (!entrada || typeof entrada !== 'object') entrada = {};
   const base = configPorDefecto();
-  const islas = Array.isArray(entrada.islas)
+  const solicitadas = Array.isArray(entrada.islas)
     ? ISLAS_ORDEN.filter((i) => entrada.islas.includes(i))
     : base.islas;
+  const islas = solicitadas.length ? solicitadas : base.islas;
   const config = {
-    islas: islas.length ? islas : base.islas,
+    islas,
     rondas: OPCIONES.rondas.includes(Number(entrada.rondas)) ? Number(entrada.rondas) : base.rondas,
     tiempo: OPCIONES.tiempo.includes(Number(entrada.tiempo)) ? Number(entrada.tiempo) : base.tiempo,
     movimiento: OPCIONES.movimiento.includes(entrada.movimiento) ? entrada.movimiento : base.movimiento,
     zonas: OPCIONES.zonas.includes(entrada.zonas) ? entrada.zonas : base.zonas,
     pistaIsla: typeof entrada.pistaIsla === 'boolean' ? entrada.pistaIsla : base.pistaIsla,
     cuentaAtras: typeof entrada.cuentaAtras === 'boolean' ? entrada.cuentaAtras : base.cuentaAtras,
-    dificultad: entrada.dificultad in DIFICULTADES ? entrada.dificultad : 'personalizada',
+    dificultad: Object.hasOwn(DIFICULTADES, entrada.dificultad) ? entrada.dificultad : 'personalizada',
+    municipios: Array.isArray(entrada.municipios) ? [...new Set(entrada.municipios.filter((m) =>
+      typeof m === 'string' && /^\d{5}$/.test(m)
+      && (!municipios || municipios.some((x) => x.id === m && x.islas.some((i) => islas.includes(i))))))].slice(0, 88) : [],
+    pistaMunicipio: entrada.pistaMunicipio === true,
+    ...Object.fromEntries(['reparto', 'orientacion', 'fuente', 'segundosCuentaAtras'].map((c) =>
+      [c, OPCIONES[c].includes(entrada[c]) ? entrada[c] : base[c]])),
   };
   return recalcularDificultad(config);
 }
@@ -116,6 +132,23 @@ export function bboxUnion(islasSel, islasInfo) {
   ];
 }
 
+export function limitesPartida(config, islasInfo, municipios = []) {
+  if (!config.municipios?.length) return bboxUnion(config.islas, islasInfo);
+  const cajas = [];
+  for (const m of municipios.filter((m) => config.municipios.includes(m.id))) {
+    for (const i of islasInfo.filter((i) => config.islas.includes(i.id) && m.islas.includes(i.id))) {
+      const b = [Math.max(m.bbox[0], i.bbox[0]), Math.max(m.bbox[1], i.bbox[1]), Math.min(m.bbox[2], i.bbox[2]), Math.min(m.bbox[3], i.bbox[3])];
+      if (b[0] < b[2] && b[1] < b[3]) cajas.push({ id: String(cajas.length), bbox: b });
+    }
+  }
+  return cajas.length ? bboxUnion(cajas.map((c) => c.id), cajas) : bboxUnion(config.islas, islasInfo);
+}
+
+export function escalaPartida(config, islasInfo, municipios = []) {
+  const b = limitesPartida(config, islasInfo, municipios);
+  return b ? Math.max(25, distanciaKm({ lat: b[1], lng: b[0] }, { lat: b[3], lng: b[2] })) : 100;
+}
+
 // Tamaño del "mapa" de la partida: la diagonal de las islas elegidas.
 // La puntuación decae según esa escala, como en GeoGuessr.
 export function diagonalKm(islasSel, islasInfo) {
@@ -132,6 +165,36 @@ export function puntuar(distKm, diagKm) {
 
 // ---------- selección de ubicaciones ----------
 
+export function clavesUbicacion(u) {
+  // El panorama y las coordenadas sobreviven a una regeneración de los IDs del banco.
+  return [u.id, u.pano ? `p:${u.pano}` : null,
+    Number.isFinite(u.lat) && Number.isFinite(u.lng) ? `g:${u.lat.toFixed(5)},${u.lng.toFixed(5)}` : null].filter(Boolean);
+}
+
+export function filtrarUbicaciones(ubicaciones, config, excluir = new Set()) {
+  const vistas = new Set(excluir);
+  for (const u of ubicaciones) if (clavesUbicacion(u).some((k) => vistas.has(k))) clavesUbicacion(u).forEach((k) => vistas.add(k));
+  return ubicaciones.filter((u) => {
+    if (!config.islas.includes(u.isla) || (config.municipios?.length && !config.municipios.includes(u.municipio))) return false;
+    if (config.zonas !== 'mixto' && u.zona !== (config.zonas === 'urbano' ? 'u' : 'r')) return false;
+    const claves = clavesUbicacion(u);
+    if (claves.some((k) => vistas.has(k))) return false;
+    claves.forEach((k) => vistas.add(k));
+    return true;
+  });
+}
+
+export function rumboInicial(u, config, rng = Math.random) {
+  return config.orientacion === 'norte' ? 0 : config.orientacion === 'aleatoria' ? Math.floor(rng() * 360) : u.rumbo;
+}
+
+export function configClasificable(config) {
+  return Object.hasOwn(DIFICULTADES, config.dificultad) && config.rondas === 5
+    && !config.municipios?.length && !config.pistaMunicipio
+    && (!config.reparto || config.reparto === 'equilibrado')
+    && (!config.orientacion || config.orientacion === 'carretera');
+}
+
 function barajar(lista, rng) {
   const a = [...lista];
   for (let i = a.length - 1; i > 0; i--) {
@@ -144,29 +207,21 @@ function barajar(lista, rng) {
 // Reparte las rondas entre las islas elegidas (sin repetir isla hasta haberlas usado todas)
 // y escoge ubicaciones al azar del tipo de zona pedido.
 export function elegirUbicaciones(ubicaciones, config, { excluir = new Set(), rng = Math.random } = {}) {
+  const disponibles = filtrarUbicaciones(ubicaciones, config, excluir);
+  if (config.reparto === 'azar') return barajar(disponibles, rng).slice(0, config.rondas);
   const pools = new Map();
   for (const isla of config.islas) {
-    const deIsla = ubicaciones.filter((u) => u.isla === isla);
-    let pool = deIsla;
-    if (config.zonas === 'urbano') pool = deIsla.filter((u) => u.zona === 'u');
-    else if (config.zonas === 'rural') pool = deIsla.filter((u) => u.zona === 'r');
-    if (pool.length < 3) pool = deIsla;
-    const sinVistas = pool.filter((u) => !excluir.has(u.id));
-    if (sinVistas.length >= Math.min(config.rondas, 3)) pool = sinVistas;
+    const pool = disponibles.filter((u) => u.isla === isla);
     if (pool.length) pools.set(isla, barajar(pool, rng));
   }
-  const islasDisponibles = [...pools.keys()];
-  if (!islasDisponibles.length) return [];
-
-  const orden = [];
-  while (orden.length < config.rondas) {
-    orden.push(...barajar(islasDisponibles, rng));
-  }
   const elegidas = [];
-  for (const isla of orden.slice(0, config.rondas)) {
-    const pool = pools.get(isla);
-    const u = pool.find((x) => !elegidas.includes(x));
-    if (u) elegidas.push(u);
+  while (pools.size && elegidas.length < config.rondas) {
+    for (const isla of barajar([...pools.keys()], rng)) {
+      const pool = pools.get(isla);
+      elegidas.push(pool.pop());
+      if (!pool.length) pools.delete(isla);
+      if (elegidas.length === config.rondas) break;
+    }
   }
   return elegidas;
 }

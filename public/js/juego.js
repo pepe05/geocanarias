@@ -4,7 +4,7 @@
 import { $, esc, inicial, mostrarPantalla, pantalla, almacen } from './ui.js';
 import { crearVisor } from './visor.js';
 import { crearMapaAdivinar } from './mapas.js';
-import { bboxUnion, formatoPuntos } from './nucleo.js';
+import { limitesPartida, formatoPuntos } from './nucleo.js';
 import { sonido } from './sonido.js';
 
 export function crearPantallaJuego({ datos }) {
@@ -22,14 +22,19 @@ export function crearPantallaJuego({ datos }) {
   let enviado = false;
   let ultimoSegundo = null;
   let temporizadorAviso = null;
+  let ultimaMarca = null;
 
   const mapa = crearMapaAdivinar($('#mapa-adivinar'), {
-    alMarcar: () => {
+    alMarcar: (pos) => {
       if (enviado) return;
+      if (finLocal && Date.now() >= finLocal) { tic(); return; }
+      ultimaMarca = { lat: pos.lat, lng: pos.lng };
       btnAdivinar.disabled = false;
       btnAdivinar.textContent = 'Adivinar';
       panel.classList.add('con-marca');
       sonido.marcar();
+      manejadores.alMarcar?.({ lat: pos.lat, lng: pos.lng });
+      $('#mapa-guardado').textContent = 'La chincheta se enviará al acabarse el tiempo';
     },
   });
 
@@ -49,23 +54,31 @@ export function crearPantallaJuego({ datos }) {
     almacen.escribir('mapaFijado', f);
     setTimeout(() => mapa.refrescar(), 240);
   });
+  // En el móvil el mapa ocupa toda la pantalla: el chat se esconde mientras tanto
+  const abrirMapaMovil = (abierto) => {
+    panel.classList.toggle('abierto', abierto);
+    document.body.classList.toggle('mapa-abierto', abierto);
+  };
   $('#btn-abrir-mapa').addEventListener('click', () => {
-    panel.classList.add('abierto');
+    abrirMapaMovil(true);
     requestAnimationFrame(() => mapa.refrescar());
   });
-  $('#btn-cerrar-mapa').addEventListener('click', () => panel.classList.remove('abierto'));
+  $('#btn-cerrar-mapa').addEventListener('click', () => abrirMapaMovil(false));
 
   // --- acciones ---
   function adivinar() {
-    const pos = mapa.posicion();
+    const pos = ultimaMarca;
     if (enviado || !pos) return;
+    if (finLocal && Date.now() >= finLocal) { tic(); return; }
     enviado = true;
+    mapa.bloquear(true);
     sonido.adivinar();
     manejadores.alAdivinar?.({ lat: pos.lat, lng: pos.lng });
   }
 
   btnAdivinar.addEventListener('click', adivinar);
   $('#btn-reiniciar-vista').addEventListener('click', () => visor.reiniciar());
+  $('#btn-reiniciar-movil').addEventListener('click', () => visor.reiniciar());
   $('#btn-abandonar').addEventListener('click', () => manejadores.alAbandonar?.());
   $('#btn-forzar').addEventListener('click', () => manejadores.alForzar?.());
 
@@ -95,9 +108,11 @@ export function crearPantallaJuego({ datos }) {
     if (restante <= 0 && !agotado) {
       agotado = true;
       detenerReloj();
-      const pos = mapa.posicion();
+      const pos = ultimaMarca;
       if (!enviado) {
         enviado = true;
+        mapa.bloquear(true);
+        btnAdivinar.disabled = true;
         manejadores.alTiempoAgotado?.(pos ? { lat: pos.lat, lng: pos.lng } : null);
       }
     }
@@ -113,7 +128,7 @@ export function crearPantallaJuego({ datos }) {
     agotado = false;
     detenerReloj();
     tic();
-    if (fin) intervalo = setInterval(tic, 200);
+    if (fin && !agotado) intervalo = setInterval(tic, 200);
   }
 
   function mostrarAviso(texto, ms = 4000) {
@@ -128,30 +143,53 @@ export function crearPantallaJuego({ datos }) {
     iniciarRonda(m, nuevosManejadores) {
       manejadores = nuevosManejadores;
       enviado = false;
+      ultimaMarca = m.marcador || null;
       mostrarPantalla('juego');
-      panel.classList.remove('abierto', 'con-marca');
+      abrirMapaMovil(false);
+      panel.classList.remove('con-marca');
       $('#hud-ronda').textContent = `${m.ronda} / ${m.total}`;
       $('#hud-puntos').textContent = formatoPuntos(m.puntos);
       const isla = m.ubicacion.isla ? datos.islaPorId[m.ubicacion.isla] : null;
-      $('#hud-pista').hidden = !isla;
-      if (isla) $('#hud-pista-isla').textContent = isla.nombre;
+      const municipio = datos.municipioPorId[m.ubicacion.municipio];
+      $('#hud-pista').hidden = !isla && !municipio;
+      $('#hud-pista-etiqueta').textContent = municipio ? 'Municipio' : 'Isla';
+      $('#hud-pista-isla').textContent = [municipio?.nombre, isla?.nombre].filter(Boolean).join(' · ');
       $('#hud-jugadores').hidden = !m.online;
       $('#btn-forzar').hidden = true;
       avisoHud.hidden = true;
 
       const congelado = m.config.movimiento === 'congelado';
       $('#btn-reiniciar-vista').hidden = congelado;
+      // En el móvil este botón sigue visible aunque esté congelado: es el que tapa el control del giroscopio
+      $('#btn-reiniciar-movil').disabled = congelado;
+      $('#btn-reiniciar-movil').textContent = congelado ? '🧊' : '⟲';
       visor.mostrar(m.ubicacion, { congelado });
 
       btnAdivinar.disabled = true;
       btnAdivinar.classList.remove('esperando');
       btnAdivinar.textContent = 'Pon tu chincheta en el mapa';
+      $('#mapa-guardado').textContent = 'Al terminar el tiempo se guarda tu última chincheta';
       // la pantalla ya es visible: Leaflet puede medir el contenedor
-      mapa.preparar({ bbox: bboxUnion(m.config.islas, datos.islas), color: m.color });
+      mapa.preparar({ bbox: limitesPartida(m.config, datos.islas, datos.municipios), color: m.color });
+      if (m.marcador) {
+        mapa.restaurar(m.marcador);
+        btnAdivinar.disabled = false;
+        btnAdivinar.textContent = 'Adivinar';
+        panel.classList.add('con-marca');
+      }
       establecerFin(m.finRonda);
     },
 
     establecerFin,
+    restaurarMarcador(pos) {
+      if (enviado) return;
+      ultimaMarca = pos;
+      mapa.restaurar(pos);
+      btnAdivinar.disabled = false;
+      btnAdivinar.textContent = 'Adivinar';
+      panel.classList.add('con-marca');
+    },
+    marcadorGuardado() { $('#mapa-guardado').textContent = '✓ Chincheta guardada para el final del tiempo'; },
 
     // Botón para que el anfitrión cierre la ronda si alguien no responde
     mostrarForzar(visible) {
@@ -180,6 +218,7 @@ export function crearPantallaJuego({ datos }) {
     },
 
     detener() {
+      abrirMapaMovil(false);
       detenerReloj();
       finLocal = null;
       reloj.hidden = true;

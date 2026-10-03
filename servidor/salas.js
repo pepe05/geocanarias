@@ -14,8 +14,17 @@ const ESPERA_BORRADO_MS = 10 * 60 * 1000;
 const MARGEN_ANFITRION_MS = 15 * 1000;
 const MAX_SALAS = 500;
 const REACCIONES = ['👏', '😂', '😱', '🔥', '🤔', '😎', '🌋', '🐐'];
+const MAX_MENSAJES_GUARDADOS = 60;
+const MAX_LARGO_MENSAJE = 200;
 
-export function crearGestorSalas(io, { islas, ubicaciones }) {
+// Texto de chat seguro: sin caracteres de control, espacios normalizados y longitud limitada
+export function limpiarMensaje(texto) {
+  if (typeof texto !== 'string') return '';
+  return texto.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ')
+    .replace(/\s+/g, ' ').trim().slice(0, MAX_LARGO_MENSAJE);
+}
+
+export function crearGestorSalas(io, { islas, ubicaciones, municipios = [], catalogo }) {
   const salas = new Map();
 
   function nuevoCodigo() {
@@ -34,10 +43,10 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
   const conectados = (sala) => [...sala.jugadores.values()].filter((j) => j.conectado);
 
   function ubicacionPublica(u) {
-    return { id: u.id, isla: u.isla, lat: u.lat, lng: u.lng, pano: u.pano, rumbo: u.rumbo, lugar: u.lugar, cerca: u.cerca, calle: u.calle, fecha: u.fecha };
+    return { id: u.id, isla: u.isla, municipio: u.municipio, lat: u.lat, lng: u.lng, pano: u.pano, rumbo: u.rumbo, lugar: u.lugar, cerca: u.cerca, calle: u.calle, fecha: u.fecha };
   }
 
-  function instantanea(sala) {
+  function instantanea(sala, jugador = null) {
     const indice = sala.ronda - 1;
     const s = {
       codigo: sala.codigo,
@@ -45,6 +54,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
       estado: sala.estado,
       config: sala.config,
       ronda: sala.ronda,
+      rondaId: sala.rondaId,
       totalRondas: sala.ubicaciones.length || sala.config.rondas,
       ahora: Date.now(),
       finRonda: sala.finRonda,
@@ -60,7 +70,9 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
     };
     if (sala.estado === 'ronda') {
       const u = sala.ubicaciones[indice];
-      s.ubicacion = { pano: u.pano, rumbo: u.rumbo, isla: sala.config.pistaIsla ? u.isla : null };
+      s.ubicacion = { pano: u.pano, rumbo: u.rumbo, isla: sala.config.pistaIsla ? u.isla : null,
+        municipio: sala.config.pistaMunicipio ? u.municipio : null };
+      if (jugador) s.miMarcador = jugador.marcador;
     } else if (sala.estado === 'resultado' || sala.estado === 'final') {
       s.resultados = sala.ubicaciones.slice(0, sala.ronda).map((u, i) => ({
         ubicacion: ubicacionPublica(u),
@@ -81,21 +93,37 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
     }
   }
 
-  function empezarPartida(sala) {
-    sala.diagonal = N.diagonalKm(sala.config.islas, islas);
-    sala.ubicaciones = N.elegirUbicaciones(ubicaciones, sala.config, { excluir: sala.usadas });
-    if (sala.usadas.size > 1000) sala.usadas.clear();
-    sala.ubicaciones.forEach((u) => sala.usadas.add(u.id));
-    for (const j of sala.jugadores.values()) {
-      j.puntos = 0;
-      j.intentos = [];
+  async function empezarPartida(sala) {
+    const anterior = sala.estado;
+    sala.estado = 'preparando';
+    emitir(sala);
+    try {
+      const r = catalogo
+        ? await catalogo.preparar(sala.config, { tokens: [...sala.jugadores.values()].map((j) => j.token), excluir: sala.usadas })
+        : { ubicaciones: N.elegirUbicaciones(ubicaciones, sala.config, { excluir: sala.usadas }) };
+      if (!salas.has(sala.codigo)) return;
+      if (r.ubicaciones.length < sala.config.rondas) throw new Error('No quedan suficientes lugares sin repetir. Reduce las rondas o amplía los filtros.');
+      sala.diagonal = N.escalaPartida(sala.config, islas, municipios);
+      sala.ubicaciones = r.ubicaciones;
+      sala.ubicaciones.flatMap(N.clavesUbicacion).forEach((k) => sala.usadas.add(k));
+      if (r.aviso) io.to(sala.codigo).emit('avisoPartida', r.aviso);
+      for (const j of sala.jugadores.values()) {
+        j.puntos = 0;
+        j.intentos = [];
+      }
+      sala.ronda = 0;
+      iniciarRonda(sala);
+    } catch (e) {
+      sala.estado = anterior;
+      emitir(sala);
+      io.to(sala.codigo).emit('errorPartida', e.message);
     }
-    sala.ronda = 0;
-    iniciarRonda(sala);
   }
 
   function iniciarRonda(sala) {
     sala.ronda++;
+    sala.rondaId = crypto.randomUUID();
+    for (const j of sala.jugadores.values()) j.marcador = null;
     sala.estado = 'ronda';
     sala.primerIntento = false;
     sala.finRonda = sala.config.tiempo ? Date.now() + sala.config.tiempo * 1000 + MARGEN_CARGA_MS : null;
@@ -106,6 +134,9 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
   function terminarRonda(sala) {
     if (sala.estado !== 'ronda') return;
     clearTimeout(sala.temporizador);
+    for (const j of sala.jugadores.values()) {
+      if (!j.intentos[sala.ronda - 1]) registrarIntento(sala, j, j.marcador, true);
+    }
     sala.finRonda = null;
     sala.estado = 'resultado';
     emitir(sala);
@@ -118,25 +149,32 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
     if (activos.length && activos.every((j) => j.intentos[indice])) terminarRonda(sala);
   }
 
+  function registrarIntento(sala, jugador, pos, automatico = false) {
+    const indice = sala.ronda - 1;
+    if (jugador.intentos[indice]) return;
+    const distancia = pos ? N.distanciaKm(sala.ubicaciones[indice], pos) : null;
+    const puntos = pos ? N.puntuar(distancia, sala.diagonal) : 0;
+    jugador.intentos[indice] = { lat: pos?.lat ?? null, lng: pos?.lng ?? null, distancia, puntos, automatico };
+    jugador.puntos += puntos;
+  }
+
+  const posicionValida = (pos) => pos && Number.isFinite(pos.lat) && Number.isFinite(pos.lng) && Math.abs(pos.lat) <= 90 && Math.abs(pos.lng) <= 180;
+
   function adivinar(sala, jugador, lat, lng) {
     if (sala.estado !== 'ronda') return;
     const indice = sala.ronda - 1;
     if (jugador.intentos[indice]) return;
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
-    if (sala.finRonda && Date.now() > sala.finRonda + 1500) return;
+    if (sala.finRonda && Date.now() >= sala.finRonda) return;
 
-    const u = sala.ubicaciones[indice];
-    const distancia = N.distanciaKm(u, { lat, lng });
-    const puntos = N.puntuar(distancia, sala.diagonal);
-    jugador.intentos[indice] = { lat, lng, distancia, puntos };
-    jugador.puntos += puntos;
+    registrarIntento(sala, jugador, { lat, lng });
 
     const pendientes = conectados(sala).filter((j) => !j.intentos[indice]);
     if (!pendientes.length) return terminarRonda(sala);
 
     if (sala.config.cuentaAtras && !sala.primerIntento) {
       sala.primerIntento = true;
-      const limite = Date.now() + N.SEGUNDOS_CUENTA_ATRAS * 1000;
+      const limite = Date.now() + sala.config.segundosCuentaAtras * 1000;
       if (!sala.finRonda || sala.finRonda > limite) {
         sala.finRonda = limite;
         programarFin(sala);
@@ -186,6 +224,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
         if (j.socketId && j.socketId !== socket.id) io.sockets.sockets.get(j.socketId)?.leave(s.codigo);
         j.nombre = nombre || j.nombre;
       } else {
+        if (!['sala', 'final'].includes(s.estado)) return { ok: false, error: 'La partida ya está en marcha. Podrás entrar cuando termine para jugar la siguiente.' };
         if (s.jugadores.size >= MAX_JUGADORES) return { ok: false, error: 'La sala está llena.' };
         j = { id: crypto.randomUUID().slice(0, 8), token, nombre, color: colorLibre(s), puntos: 0, intentos: [] };
         s.jugadores.set(j.id, j);
@@ -199,7 +238,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
       socket.join(s.codigo);
       if (!s.jugadores.has(s.anfitrion)) s.anfitrion = j.id;
       emitir(s);
-      return { ok: true, codigo: s.codigo, id: j.id, estado: instantanea(s) };
+      return { ok: true, codigo: s.codigo, id: j.id, estado: instantanea(s, j), chat: s.chat };
     }
 
     function salir() {
@@ -231,7 +270,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
         codigo: nuevoCodigo(),
         anfitrion: null,
         estado: 'sala',
-        config: N.normalizarConfig(datos.config),
+        config: N.normalizarConfig(datos.config, municipios),
         jugadores: new Map(),
         ubicaciones: [],
         usadas: new Set(),
@@ -239,12 +278,13 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
         finRonda: null,
         diagonal: 100,
         ultimaActividad: Date.now(),
+        chat: [],
       };
       salas.set(s.codigo, s);
       const r = entrar(s, nombre, token);
       s.anfitrion = jugador.id;
       emitir(s);
-      responder(ack, { ...r, estado: instantanea(s) });
+      responder(ack, { ...r, estado: instantanea(s, jugador) });
     });
 
     socket.on('unirse', (datos = {}, ack) => {
@@ -259,7 +299,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
 
     socket.on('config', (config) => {
       if (!esAnfitrion() || sala.estado !== 'sala') return;
-      sala.config = N.normalizarConfig(config);
+      sala.config = N.normalizarConfig(config, municipios);
       emitir(sala);
     });
 
@@ -270,9 +310,17 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
     });
 
     socket.on('adivinar', (datos = {}) => {
-      if (!sala || !jugador) return;
+      if (!sala || !jugador || jugador.socketId !== socket.id || datos.rondaId !== sala.rondaId) return;
       sala.ultimaActividad = Date.now();
-      adivinar(sala, jugador, Number(datos.lat), Number(datos.lng));
+      adivinar(sala, jugador, datos.lat, datos.lng);
+    });
+
+    socket.on('marcador', (datos = {}) => {
+      if (!sala || !jugador || jugador.socketId !== socket.id || sala.estado !== 'ronda' || datos.rondaId !== sala.rondaId) return;
+      if (jugador.intentos[sala.ronda - 1] || (sala.finRonda && Date.now() >= sala.finRonda) || !posicionValida(datos)) return;
+      jugador.marcador = { lat: datos.lat, lng: datos.lng };
+      // Privado: las coordenadas provisionales nunca se difunden a los rivales.
+      socket.emit('marcadorGuardado', { rondaId: sala.rondaId, ...jugador.marcador });
     });
 
     socket.on('siguiente', () => {
@@ -310,6 +358,26 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
       io.to(sala.codigo).emit('reaccion', { id: jugador.id, emoji });
     });
 
+    socket.on('chat', (texto) => {
+      if (!sala || !jugador || jugador.socketId !== socket.id) return;
+      const limpio = limpiarMensaje(texto);
+      if (!limpio) return;
+      // Como mucho 5 mensajes cada 8 segundos y no más de uno cada 400 ms
+      const ahora = Date.now();
+      jugador.chatTiempos = (jugador.chatTiempos || []).filter((t) => ahora - t < 8000);
+      const ultimo = jugador.chatTiempos[jugador.chatTiempos.length - 1];
+      if (jugador.chatTiempos.length >= 5 || (ultimo && ahora - ultimo < 400)) {
+        socket.emit('chatAviso', 'Vas muy rápido escribiendo. Espera un momento.');
+        return;
+      }
+      jugador.chatTiempos.push(ahora);
+      const mensaje = { id: crypto.randomUUID().slice(0, 8), jugador: jugador.id, nombre: jugador.nombre, color: jugador.color, texto: limpio, hora: ahora };
+      sala.chat.push(mensaje);
+      if (sala.chat.length > MAX_MENSAJES_GUARDADOS) sala.chat.shift();
+      sala.ultimaActividad = ahora;
+      io.to(sala.codigo).emit('chat', mensaje);
+    });
+
     socket.on('salir', (ack) => {
       salir();
       responder(ack, { ok: true });
@@ -325,7 +393,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
         const j = jugador;
         setTimeout(() => {
           if (!j.conectado && s.jugadores.get(j.id) === j) quitarJugador(s, j);
-        }, 20000);
+        }, 20000).unref();
       }
       if (sala.anfitrion === jugador.id) {
         // margen por si solo ha recargado la página
@@ -335,7 +403,7 @@ export function crearGestorSalas(io, { islas, ubicaciones }) {
           const antes = s.anfitrion;
           reasignarAnfitrion(s);
           if (s.anfitrion !== antes) emitir(s);
-        }, MARGEN_ANFITRION_MS);
+        }, MARGEN_ANFITRION_MS).unref();
       }
       comprobarFinRonda(sala);
       emitir(sala);

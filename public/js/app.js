@@ -95,6 +95,7 @@ async function iniciar() {
   function abrirConfigSolo() {
     if (!editorSolo) {
       editorSolo = crearConfigPartida($('#config-solo'), {
+        ...datos,
         islas: datos.islas,
         islaPorId: datos.islaPorId,
         config: normalizarConfig(almacen.leer('configSolo') || {}),
@@ -105,13 +106,14 @@ async function iniciar() {
       });
     }
     pintarNotaClasificacion(editorSolo.obtener());
+    editorSolo.refrescar();
     mostrarPantalla('config');
   }
 
   function pintarNotaClasificacion(cfg) {
     $('#nota-clasificacion').textContent = puntuaEnClasificacion(cfg)
       ? `🏆 Esta partida puntúa en la clasificación (${nombreDificultad(cfg.dificultad)}).`
-      : 'ℹ️ Solo puntúan en la clasificación las partidas de 5 rondas con una dificultad estándar.';
+      : 'ℹ️ Para la clasificación: 5 rondas estándar, sin filtro municipal ni ayudas extra, con reparto equilibrado y orientación de carretera.';
   }
 
   const solo = crearModoSolo({
@@ -158,10 +160,14 @@ async function iniciar() {
     if (b && acciones[b.dataset.accion]) acciones[b.dataset.accion]();
   });
 
-  $('#btn-empezar-solo').addEventListener('click', () => {
+  $('#btn-empezar-solo').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = '🎲 Buscando lugares al azar…';
     const cfg = editorSolo.obtener();
     almacen.escribir('configSolo', cfg);
-    solo.empezar(cfg);
+    try { await solo.empezar(cfg); }
+    finally { btn.disabled = false; btn.textContent = 'Empezar partida'; editorSolo.refrescar(); }
   });
 
   // ---------- enlaces de invitación y recargas ----------

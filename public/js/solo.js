@@ -2,32 +2,57 @@
 // Al terminar, si es una partida estándar, se envía a la clasificación global (el servidor recalcula los puntos).
 
 import {
-  DIFICULTADES, elegirUbicaciones, diagonalKm, distanciaKm, puntuar, claveIslas, formatoPuntos,
+  elegirUbicaciones, escalaPartida, distanciaKm, puntuar, claveIslas, formatoPuntos, configClasificable, rumboInicial,
 } from './nucleo.js';
-import { almacen, confirmar, esc } from './ui.js';
-
-const MAX_VISTAS = 500;
+import { almacen, confirmar, esc, aviso } from './ui.js';
+import { leerVistas, recordarUbicaciones, obtenerToken } from './historial.js';
 
 export function puntuaEnClasificacion(config) {
-  return config.dificultad in DIFICULTADES && config.rondas === 5;
+  return configClasificable(config);
 }
 
 export function crearModoSolo({ datos, juego, resultados, nombreJugador, alSalir, alConfigurar }) {
   let partida = null;
+  let preparando = false;
 
-  function empezar(config) {
-    const vistas = almacen.leer('vistas', []);
-    const ubicaciones = elegirUbicaciones(datos.ubicaciones, config, { excluir: new Set(vistas) });
-    almacen.escribir('vistas', [...vistas, ...ubicaciones.map((u) => u.id)].slice(-MAX_VISTAS));
-    partida = {
-      config,
-      ubicaciones,
-      ronda: 0,
-      intentos: [],
-      puntos: 0,
-      diagonal: diagonalKm(config.islas, datos.islas),
-    };
-    siguienteRonda();
+  async function empezar(config) {
+    if (preparando) return;
+    preparando = true;
+    try {
+      const vistas = leerVistas();
+      let ubicaciones;
+      let res;
+      try {
+        res = await fetch('api/partida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config, token: obtenerToken(), vistas: [...vistas] }), signal: AbortSignal.timeout(30000) });
+      } catch (e) {
+        // Un timeout puede haber reservado la partida: no repetir localmente esos lugares.
+        if (e.name === 'TimeoutError') throw new Error('La búsqueda está tardando demasiado. Vuelve a intentarlo en unos segundos.');
+      }
+      if (res && res.status !== 404 && res.headers.get('content-type')?.includes('application/json')) {
+        const r = await res.json();
+        if (!r.ok) throw new Error(r.error || 'No se pudo preparar la partida.');
+        ubicaciones = r.ubicaciones;
+        config = r.config;
+        if (r.aviso) aviso(r.aviso, '', 7000);
+      } else {
+        await datos.banco;
+        ubicaciones = elegirUbicaciones(datos.ubicaciones, config, { excluir: vistas }).map((u) => ({ ...u, rumbo: rumboInicial(u, config) }));
+        if (ubicaciones.length < config.rondas) throw new Error(`Solo quedan ${ubicaciones.length} lugares sin visitar. Reduce las rondas o amplía los filtros. Arranca el servidor para buscar nuevos panoramas.`);
+        if (config.fuente === 'aleatoria') aviso('Sin servidor no se pueden sacar lugares al azar: usamos ubicaciones sin visitar del banco.', '', 6000);
+      }
+      recordarUbicaciones(ubicaciones);
+      partida = {
+        config,
+        ubicaciones,
+        ronda: 0,
+        intentos: [],
+        puntos: 0,
+        diagonal: escalaPartida(config, datos.islas, datos.municipios),
+      };
+      siguienteRonda();
+    } catch (e) { aviso(e.message, 'error', 9000); }
+    finally { preparando = false; }
   }
 
   function siguienteRonda() {
@@ -37,7 +62,8 @@ export function crearModoSolo({ datos, juego, resultados, nombreJugador, alSalir
     const verIsla = p.config.pistaIsla && p.config.islas.length > 1;
     juego.iniciarRonda(
       {
-        ubicacion: { pano: u.pano, rumbo: u.rumbo, isla: verIsla ? u.isla : null },
+        ubicacion: { pano: u.pano, rumbo: u.rumbo, isla: verIsla ? u.isla : null,
+          municipio: p.config.pistaMunicipio ? u.municipio : null },
         ronda: p.ronda,
         total: p.ubicaciones.length,
         puntos: p.puntos,
@@ -47,19 +73,19 @@ export function crearModoSolo({ datos, juego, resultados, nombreJugador, alSalir
       },
       {
         alAdivinar: registrarIntento,
-        alTiempoAgotado: registrarIntento,
+        alTiempoAgotado: (pos) => registrarIntento(pos, true),
         alAbandonar: abandonar,
       },
     );
   }
 
-  function registrarIntento(pos) {
+  function registrarIntento(pos, automatico = false) {
     const p = partida;
     if (!p || p.intentos.length >= p.ronda) return;
     const u = p.ubicaciones[p.ronda - 1];
     const distancia = pos ? distanciaKm(u, pos) : null;
     const puntos = pos ? puntuar(distancia, p.diagonal) : 0;
-    const intento = { id: u.id, lat: pos?.lat ?? null, lng: pos?.lng ?? null, distancia, puntos };
+    const intento = { id: u.id, lat: pos?.lat ?? null, lng: pos?.lng ?? null, distancia, puntos, automatico };
     p.intentos.push(intento);
     p.puntos += puntos;
     juego.detener();
@@ -114,6 +140,7 @@ export function crearModoSolo({ datos, juego, resultados, nombreJugador, alSalir
         body: JSON.stringify({
           nombre,
           dificultad: p.config.dificultad,
+          config: p.config,
           islas: p.config.islas,
           rondas: p.intentos.map((i) => ({ id: i.id, lat: i.lat, lng: i.lng })),
         }),

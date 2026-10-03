@@ -38,6 +38,7 @@ export function crearClasificacion({ fichero, islas, ubicaciones }) {
     const nombre = limpiarNombre(cuerpo?.nombre);
     if (!nombre) return { ok: false, error: 'Escribe un nombre para aparecer en la clasificación.' };
     const dificultad = cuerpo?.dificultad;
+    if (cuerpo?.config && !N.configClasificable(N.normalizarConfig(cuerpo.config))) return { ok: false, error: 'Los filtros municipales y las ayudas personalizadas no puntúan en la clasificación estándar.' };
     if (!(dificultad in N.DIFICULTADES)) return { ok: false, error: 'Solo puntúan las dificultades estándar.' };
     const islasSel = N.ISLAS_ORDEN.filter((i) => Array.isArray(cuerpo.islas) && cuerpo.islas.includes(i));
     if (!islasSel.length) return { ok: false, error: 'Islas no válidas.' };
@@ -48,7 +49,7 @@ export function crearClasificacion({ fichero, islas, ubicaciones }) {
     const vistos = new Set();
     let puntos = 0;
     for (const r of rondas) {
-      const u = porId.get(r?.id);
+      const u = porId.get(r?.id) || ubicaciones.find((u) => u.id === r?.id);
       if (!u || vistos.has(u.id) || !islasSel.includes(u.isla)) return { ok: false, error: 'Partida no válida.' };
       vistos.add(u.id);
       if (Number.isFinite(r.lat) && Number.isFinite(r.lng)) puntos += N.puntuar(N.distanciaKm(u, r), diag);

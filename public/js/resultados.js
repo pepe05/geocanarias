@@ -18,7 +18,8 @@ export function crearResultados({ datos }) {
 
   function lugarHtml(u) {
     const isla = datos.islaPorId[u.isla]?.nombre ?? '';
-    const donde = [u.lugar, isla].filter(Boolean).join(', ');
+    const municipio = datos.municipioPorId[u.municipio]?.nombre;
+    const donde = [...new Set([u.lugar, municipio, isla].filter(Boolean))].join(', ');
     const partes = [`<span>📍 ${u.cerca ? `Cerca de ${esc(u.cerca)} · ` : ''}${esc(donde)}</span>`];
     if (u.calle) partes.push(`<span>🛣️ ${esc(u.calle)}</span>`);
     const fecha = formatoFechaImagen(u.fecha);
@@ -43,7 +44,7 @@ export function crearResultados({ datos }) {
   function textoDistancia(intento) {
     if (!intento || intento.lat == null) return 'Se acabó el tiempo y no pusiste ninguna chincheta 😬';
     if (intento.distancia < 0.05) return '¡Clavado! Diste justo en el sitio 🎯';
-    return `Tu chincheta quedó a <strong>${formatoDistancia(intento.distancia)}</strong> del lugar correcto`;
+    return `${intento.automatico ? '⌛ Chincheta guardada automáticamente. ' : ''}Tu chincheta quedó a <strong>${formatoDistancia(intento.distancia)}</strong> del lugar correcto`;
   }
 
   function pintarMapaFinal(contenedor, rondas) {
@@ -90,7 +91,7 @@ export function crearResultados({ datos }) {
           <span class="etiqueta">Puntuación final</span>
           <div class="final-total"><span data-cifra>0</span> <small>/ ${formatoPuntos(max)}</small></div>
           <p class="final-valoracion">${esc(valoracion(partida.puntos / max))}</p>
-          <p class="final-config">${esc(nombreDificultad(c.dificultad))} · ${esc(nombreIslas(c.islas, datos.islaPorId))} · ${c.rondas} rondas</p>
+          <p class="final-config">${esc(nombreDificultad(c.dificultad))} · ${esc(nombreIslas(c.islas, datos.islaPorId))} · ${c.rondas} ronda${c.rondas === 1 ? '' : 's'}</p>
         </div>
         <div class="final-registro" data-registro ${registro ? '' : 'hidden'}>${registro ?? ''}</div>
         <div class="final-mapa" data-mapa-final></div>
@@ -205,7 +206,7 @@ export function crearResultados({ datos }) {
         <div class="final-cabecera">
           <span class="etiqueta">Sala ${esc(estado.codigo)} · Resultado final</span>
           <p class="final-valoracion">${posicion === 1 ? '🏆 ¡Has ganado la partida!' : `Has quedado en ${posicion}.ª posición`}</p>
-          <p class="final-config">${esc(nombreDificultad(c.dificultad))} · ${esc(nombreIslas(c.islas, datos.islaPorId))} · ${estado.totalRondas} rondas</p>
+          <p class="final-config">${esc(nombreDificultad(c.dificultad))} · ${esc(nombreIslas(c.islas, datos.islaPorId))} · ${estado.totalRondas} ronda${estado.totalRondas === 1 ? '' : 's'}</p>
         </div>
         <div class="podio">
           ${podio.map((j, i) => {

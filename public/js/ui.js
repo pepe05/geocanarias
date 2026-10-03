@@ -14,6 +14,7 @@ export function mostrarPantalla(id) {
   for (const p of $$('.pantalla')) p.classList.toggle('activa', p.id === `pantalla-${id}`);
   const anterior = pantallaActual;
   pantallaActual = id;
+  document.body.dataset.pantalla = id; // permite colocar elementos comunes (chat) según la pantalla
   oyentesPantalla.forEach((fn) => fn(id, anterior));
 }
 
